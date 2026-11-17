@@ -44,5 +44,5 @@ SBT_REPOS=${SBT_REPOS:-$HOME/.sbt/launcher/sbt-repos}
 "$JAVA_HOME/bin/java" -Xmx6g -Xss4m \
   -Dsbt.repository.config="$SBT_REPOS" -Dsbt.override.build.repos=true -Dsbt.supershell=false \
   -jar "$SBT_LAUNCHER" \
-  "set every credentials += Credentials(\"Sonatype Nexus Repository Manager\", \"central.sonatype.com\", sys.env(\"SONATYPE_USERNAME\"), sys.env(\"SONATYPE_PASSWORD\"))" \
+  "set ThisBuild / credentials += Credentials(\"Sonatype Nexus Repository Manager\", \"central.sonatype.com\", sys.env(\"SONATYPE_USERNAME\"), sys.env(\"SONATYPE_PASSWORD\"))" \
   "+publishSigned" "$release_cmd" < /dev/null
