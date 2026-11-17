@@ -14,14 +14,18 @@
 #   ./publish-central.sh            # uploads and releases; the version comes from versionNum in build.sbt
 #   ./publish-central.sh --no-release   # uploads only; review and publish in the Central Portal UI
 set -euo pipefail
+
+export SONATYPE_USERNAME=wangguangxin SONATYPE_PASSWORD=EWaPTdKo8r8Le4YQYt5T3qUesILvDetC3
+export PGP_PASSPHRASE=890212
+
 cd "$(dirname "$0")"
 
 : "${SONATYPE_USERNAME:?set SONATYPE_USERNAME (Central Portal user token)}"
 : "${SONATYPE_PASSWORD:?set SONATYPE_PASSWORD (Central Portal user token)}"
 : "${PGP_PASSPHRASE:?set PGP_PASSPHRASE}"
 
-release_cmd="sonatypeBundleRelease"
-if [[ "${1:-}" == "--no-release" ]]; then release_cmd="sonatypeBundleUpload"; fi
+release_cmd="sonatypeCentralRelease"
+if [[ "${1:-}" == "--no-release" ]]; then release_cmd="sonatypeCentralUpload"; fi
 
 version=$(grep -oE 'lazy val versionNum: String = "[^"]+"' build.sbt | cut -d'"' -f2)
 tag="v${version}"
