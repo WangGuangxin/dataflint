@@ -382,6 +382,34 @@ describe("GPU diagnosis", () => {
     expect(b.shortSuggestion).toBe("kudo read.mode=CPU");
   });
 
+  it("explains held time copying already fetched shuffle data like NDS-H 1K q9 stage 448", () => {
+    // app-20261117030702-0000 (numConnectionsPerPeer=4) stage 448: run 357s, held 70%, semaphore
+    // wait 4%, fetch wait 2%, shuffle read op time 63%, SM 4%, PCIe rx 16 GiB/s
+    const reader = gpuNode(1, "GpuShuffleCoalesce", 448, [
+      { name: "op time (shuffle read)", value: total("3.8 m", 448) },
+    ]);
+    const s = stage(448, 357_000, { shuffleFetchWaitMs: 6_000 }, [
+      { name: "gpuTime", value: sec(250) },
+      { name: "gpuSemaphoreWait", value: sec(14) },
+    ]);
+    const nodes = sqlStore([reader]);
+    const diag = calculateGpuDiagnosis(nodes, [s], config(TUNED_CONF), {
+      enabled: true, gpuSource: "gpm", executors: [], timeline: [], stages: [resource(448, 4, 74)],
+    })!;
+    expect(diag.stages[0].heldDuringFetchMinMs).toBe(0);
+    const alerts: Alerts = [];
+    reduceRapidsGpuAlerts(diag, nodes, alerts);
+    const a = alerts.find((x) => x.name === "gpuHeldOnShuffleRead")!;
+    expect(a.title).toBe("GPU Held While Copying Shuffle Data");
+    expect(a.message).toContain("fetch wait was only 2%");
+    expect(a.message).toContain("host to device traffic 8000 MiB/s");
+    expect(a.message).toContain("bound by the shuffle read copies");
+    // the fetch is already fast: no connection / reader thread advice
+    expect(a.suggestion).not.toContain("numConnectionsPerPeer");
+    expect(a.suggestion).toContain("shuffle fewer bytes");
+    expect(a.shortSuggestion).toBe("shuffle fewer bytes");
+  });
+
   it("scales op time attributed from operators shared by two stages", () => {
     const exchange = gpuNode(1, "GpuColumnarExchange", 23, [
       { name: "op time (shuffle read)", value: total("10.0 m", 23) },

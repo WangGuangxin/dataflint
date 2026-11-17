@@ -370,41 +370,56 @@ function heldOnShuffleReadAlert(d: StageGpuDiagnosis, c: RapidsConfigView, alert
   const harmless = semShare < T.harmlessSemaphoreShare;
   const conns = c.numConnectionsPerPeer ?? D.numConnectionsPerPeer;
   const holders = holdersText(d);
+  // waiting for the network / disk vs. working on blocks that already arrived: with a fast fetch
+  // (e.g. numConnectionsPerPeer=4) the held read time is the kudo host buffering, the host to
+  // device copy and the GPU concatenation (jstack: copyMemory / memcpyOnStream / assemble)
+  const fetchBound = proven >= T.minComponentMs || fetch / d.taskTimeMs >= T.shuffleFetchShare;
+  const rx = d.resource?.avgPcieRxMiBps ?? -1;
+  const rxText = rx >= 0 ? `, host to device traffic ${Math.round(rx)} MiB/s` : "";
 
-  const message = `Tasks held the GPU semaphore for ${ms(g)} (${share(g, d.taskTimeMs)} of task time) but ${gpuActivityText(d)}: they held it while waiting for shuffle data. ${
-    proven >= T.minComponentMs
-      ? `At least ${ms(proven)} (${share(proven, d.taskTimeMs)} of task time) of the held time the task thread was blocked on shuffle fetch (fetch wait ${share(fetch, d.taskTimeMs)})`
-      : `At least ${ms(d.heldWhileWaitingMinMs)} of the held time went to reading shuffle input (shuffle read ${share(d.activity.shuffleReadMs, d.taskTimeMs)} of task time)`
+  const message = `Tasks held the GPU semaphore for ${ms(g)} (${share(g, d.taskTimeMs)} of task time) but ${gpuActivityText(d)}: ${
+    fetchBound
+      ? `they held it while waiting for shuffle data. At least ${ms(proven)} (${share(proven, d.taskTimeMs)} of task time) of the held time the task thread was blocked on shuffle fetch (fetch wait ${share(fetch, d.taskTimeMs)})`
+      : `they held it while reading shuffle input. At least ${ms(d.heldWhileWaitingMinMs)} of the held time went to the shuffle read (${share(d.activity.shuffleReadMs, d.taskTimeMs)} of task time) while fetch wait was only ${share(fetch, d.taskTimeMs)}: the blocks had arrived, the time is buffering them on the host and copying them to the GPU${rxText}`
   }. ${
     isKudoGpuRead(c)
       ? "With the kudo GPU read mode (the default) a task takes the semaphore to concatenate shuffle blocks on the GPU and keeps it while it reads more input, e.g. a shuffled join reading its stream side after its build side. "
       : ""
   }${
     harmless
-      ? `Holding cost other tasks little here: semaphore wait was ${share(d.semaphore.waitMs, d.taskTimeMs)} of task time${holders ? ` (tasks that ${holders})` : ""}. The stage is bound by the shuffle fetch, not by the GPU`
+      ? `Holding cost other tasks little here: semaphore wait was ${share(d.semaphore.waitMs, d.taskTimeMs)} of task time${holders ? ` (tasks that ${holders})` : ""}. The stage is bound by ${fetchBound ? "the shuffle fetch" : "the shuffle read copies"}, not by GPU kernels`
       : `Other tasks waited ${share(d.semaphore.waitMs, d.taskTimeMs)} of task time for the semaphore meanwhile`
   }`;
 
   const suggestions: string[] = [];
-  if (conns < 4) {
+  if (fetchBound) {
+    if (conns < 4) {
+      suggestions.push(
+        `Set spark.shuffle.io.numConnectionsPerPeer=4 (${currentValue(c.numConnectionsPerPeer, "1")}): NDS-H 1K q9 / q8 join stages went from 79% fetch wait to 2-5% and from 11.6s to 6.1s, q8 34.2s -> 28.3s`,
+      );
+    }
+    if (c.isRapidsShuffleManager) {
+      suggestions.push(
+        `Raise spark.rapids.shuffle.multiThreaded.reader.threads (${currentValue(c.shuffleReaderThreads, String(D.shuffleThreads))}) if fetch wait stays high`,
+      );
+    }
+  } else {
     suggestions.push(
-      `Set spark.shuffle.io.numConnectionsPerPeer=4 (${currentValue(c.numConnectionsPerPeer, "1")}): NDS-H 1K q9 / q8 join stages went from 79% fetch wait to 2-5% and from 11.6s to 6.1s, q8 34.2s -> 28.3s`,
+      "The read moves the whole shuffle partition through host memory and PCIe: shuffle fewer bytes (filter / project before the exchange, broadcast the small side of a join)",
     );
-  }
-  if (c.isRapidsShuffleManager) {
     suggestions.push(
-      `Raise spark.rapids.shuffle.multiThreaded.reader.threads (${currentValue(c.shuffleReaderThreads, String(D.shuffleThreads))}) if fetch wait stays high`,
+      `Keep a pinned host pool (spark.rapids.memory.pinnedPool.size, ${currentValue(c.pinnedPoolBytes !== undefined ? humanFileSize(c.pinnedPoolBytes) : undefined, "0")}): copies from pageable memory are slower`,
     );
   }
   if (harmless) {
     suggestions.push(
-      `Do not tune GPU concurrency or batch sizes for this alert: the held time is input wait. spark.rapids.shuffle.kudo.serializer.read.mode=CPU removes it from the held time (82-87% -> 3%) but did not make these stages faster, and q9 was 6% slower`,
+      `Do not tune GPU concurrency or batch sizes for this alert: the held time is ${fetchBound ? "input wait" : "shuffle read work, not GPU kernels"}. spark.rapids.shuffle.kudo.serializer.read.mode=CPU removes it from the held time (82-87% -> 3% with a slow fetch) but did not make those stages faster, and q9 was 6% slower`,
     );
   } else {
     suggestions.push(
       isKudoGpuRead(c)
-        ? "Tasks queue on the semaphore while these tasks wait for shuffle data. Try spark.rapids.shuffle.kudo.serializer.read.mode=CPU (concatenates on the host without the semaphore) and measure, or let more tasks share the GPU"
-        : "Tasks queue on the semaphore while these tasks wait for shuffle data: let more tasks share the GPU (spark.rapids.sql.concurrentGpuTasks.dynamic=true, the default since 25.06)",
+        ? "Tasks queue on the semaphore while these tasks read shuffle data. Try spark.rapids.shuffle.kudo.serializer.read.mode=CPU (concatenates on the host without the semaphore) and measure, or let more tasks share the GPU"
+        : "Tasks queue on the semaphore while these tasks read shuffle data: let more tasks share the GPU (spark.rapids.sql.concurrentGpuTasks.dynamic=true, the default since 25.06)",
     );
   }
   suggestions.push("Also check partition skew and the number of reduce partitions of this stage");
@@ -412,10 +427,18 @@ function heldOnShuffleReadAlert(d: StageGpuDiagnosis, c: RapidsConfigView, alert
     stageAlert(
       d,
       "gpuHeldOnShuffleRead",
-      "GPU Held While Waiting For Shuffle Data",
+      fetchBound ? "GPU Held While Waiting For Shuffle Data" : "GPU Held While Copying Shuffle Data",
       message,
       suggestions,
-      conns < 4 ? "numConnectionsPerPeer=4" : harmless ? "speed up shuffle fetch" : "kudo read.mode=CPU",
+      fetchBound
+        ? conns < 4
+          ? "numConnectionsPerPeer=4"
+          : harmless
+            ? "speed up shuffle fetch"
+            : "kudo read.mode=CPU"
+        : harmless
+          ? "shuffle fewer bytes"
+          : "kudo read.mode=CPU",
     ),
   );
 }
