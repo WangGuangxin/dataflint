@@ -8,12 +8,14 @@ import { SparkExecutors } from "../interfaces/SparkExecutors";
 import { SparkJobs } from "../interfaces/SparkJobs";
 import { SparkSQLs, SqlStatus } from "../interfaces/SparkSQLs";
 import { SparkStages } from "../interfaces/SparkStages";
+import { ResourceMetricsSummary } from "../interfaces/ResourceMetrics";
 import { NodesMetrics } from "../interfaces/SqlMetrics";
 import { SQLPlans } from "../interfaces/SQLPlan";
 import { StagesRdd } from "../interfaces/StagesRdd";
 import {
   onCycleEnd,
   setInitial,
+  setResourceMetrics,
   setSparkExecutors,
   setSparkJobs,
   setSQL,
@@ -32,6 +34,8 @@ import { ScarfPixelService } from "./ScarfPixelService";
 const POLL_TIME = 1000;
 const SQL_QUERY_LENGTH = 1000;
 const SQL_LOOKBACK_QUERY_TIME = 5000;
+// executor resource samples are batched every 5s by the executor plugin
+const RESOURCE_METRICS_POLL_TIME = 5000;
 
 type SQLFinishTime = {
   id: number;
@@ -74,6 +78,10 @@ class SparkAPI {
   private lastStagesCache: ResponseCache = null;
   private lastExecutorsCache: ResponseCache = null;
   private lastJobsCache: ResponseCache = null;
+  private lastResourceMetricsCache: ResponseCache = null;
+  private lastResourceMetricsFetch: number = 0;
+  // false once the endpoint answered with an error (older DataFlint jar on the server)
+  private resourceMetricsAvailable: boolean = true;
 
   private findSqlIdToQueryFrom(): number {
     const currentTime = Date.now();
@@ -141,6 +149,10 @@ class SparkAPI {
     return `${this.baseCurrentPage}/cachedstorage/json/`;
   }
 
+  private resourceMetricsPath(): string {
+    return `${this.baseCurrentPage}/resourcemetrics/json/`;
+  }
+
   private get executorsPath(): string {
     return `${this.applicationPath}/allexecutors`;
   }
@@ -157,6 +169,30 @@ class SparkAPI {
     this.lastStagesCache = null;
     this.lastExecutorsCache = null;
     this.lastJobsCache = null;
+    this.lastResourceMetricsCache = null;
+    this.lastResourceMetricsFetch = 0;
+  }
+
+  // Executor CPU / IO / GPU utilization; optional, absent when the resource monitor is off
+  private async fetchResourceMetrics(): Promise<void> {
+    if (!this.resourceMetricsAvailable) return;
+    const now = Date.now();
+    if (now - this.lastResourceMetricsFetch < RESOURCE_METRICS_POLL_TIME) return;
+    this.lastResourceMetricsFetch = now;
+    try {
+      const result = await this.fetchWithCache(
+        this.resourceMetricsPath(),
+        this.lastResourceMetricsCache,
+      );
+      if (result === null) return;
+      this.lastResourceMetricsCache = result.cache;
+      const summary = result.data as ResourceMetricsSummary;
+      if (summary !== undefined && summary.enabled) {
+        this.dispatch(setResourceMetrics({ value: summary }));
+      }
+    } catch (e) {
+      this.resourceMetricsAvailable = false;
+    }
   }
 
   constructor(
@@ -478,6 +514,8 @@ class SparkAPI {
 
       // Pass change flags to onCycleEnd - if nothing changed, skip expensive calculations
       this.dispatch(onCycleEnd({ sqlChanged, stagesChanged }));
+
+      await this.fetchResourceMetrics();
     } catch (e) {
       console.log(e);
       this.isConnected = false;

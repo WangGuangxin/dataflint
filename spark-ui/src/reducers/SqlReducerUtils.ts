@@ -2,8 +2,10 @@ import {
   EnrichedSqlMetric,
   NodeType,
   ParsedNodePlan,
+  RapidsNodeMetric,
 } from "../interfaces/AppStore";
 import { humanFileSize } from "../utils/FormatUtils";
+import { parseMetricNumber } from "../utils/MetricValueParser";
 
 const metricAllowlist: Record<NodeType, Array<string>> = {
   input: [
@@ -826,3 +828,29 @@ export function getNodeAccelerator(nodeName: string): AcceleratorInfo | undefine
   return ACCELERATOR_MAP[nodeName];
 }
 
+
+export function isRapidsNode(nodeName: string): boolean {
+  return nodeName.startsWith("Gpu");
+}
+
+/**
+ * Keeps every metric of a RAPIDS (Gpu*) node as a number. The regular metric allowlist drops
+ * most of them (op time, GPU decode time, buffer time, ...) but the GPU diagnosis needs them.
+ */
+export function calcRapidsNodeMetrics(
+  nodeName: string,
+  metrics: { name: string; value: string | undefined | null }[],
+): Record<string, RapidsNodeMetric> | undefined {
+  if (!isRapidsNode(nodeName)) return undefined;
+  const result: Record<string, RapidsNodeMetric> = {};
+  for (const metric of metrics) {
+    if (metric.value === undefined || metric.value === null) continue;
+    const value = parseMetricNumber(metric.value);
+    if (value === undefined) continue;
+    result[metric.name] = {
+      value,
+      stageId: extractStageFromSummaryMetric(metric.value),
+    };
+  }
+  return result;
+}

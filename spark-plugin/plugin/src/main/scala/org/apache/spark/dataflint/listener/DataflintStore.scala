@@ -1,5 +1,7 @@
 package org.apache.spark.dataflint.listener
 
+import org.apache.spark.dataflint.resource.{ResourceSampleBatch, ResourceSampleBatchWrapper}
+
 import scala.collection.JavaConverters._
 import org.apache.spark.util.Utils
 import org.apache.spark.util.kvstore.{KVStore, KVStoreView}
@@ -36,4 +38,7 @@ class DataflintStore(val store: KVStore) {
       .sortBy(_.minExecutionId)
   }
 
+  def resourceSampleBatches(): Seq[ResourceSampleBatch] = {
+    mapToSeq(store.view(classOf[ResourceSampleBatchWrapper]))(_.info)
+  }
 }

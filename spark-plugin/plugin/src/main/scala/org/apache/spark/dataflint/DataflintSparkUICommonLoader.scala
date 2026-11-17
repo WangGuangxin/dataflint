@@ -126,6 +126,7 @@ class DataflintSparkUICommonInstaller extends Logging {
     tab.attachPage(pageFactory.createIcebergPage(ui, dataflintStore))
     tab.attachPage(pageFactory.createDeltaLakeScanPage(ui, dataflintStore))
     tab.attachPage(pageFactory.createCachedStoragePage(ui, dataflintStore))
+    tab.attachPage(pageFactory.createResourceMetricsPage(ui, dataflintStore))
     ui.attachTab(tab)
     ui.webUrl
   }

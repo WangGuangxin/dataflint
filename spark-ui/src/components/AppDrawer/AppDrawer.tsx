@@ -16,6 +16,7 @@ import {
 import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
 import MuiDrawer from "@mui/material/Drawer";
 import React, { FC } from "react";
+import { useAppSelector } from "../../Hooks";
 import { renderTabIcon, Tab } from "../../services/TabsService";
 import DrawerFooter from "./DrawerFooter";
 
@@ -95,6 +96,8 @@ export const AppDrawer: FC<{
   onTabChanged: (tab: Tab) => void;
   appBasePath: string;
 }> = ({ selectedTab, onTabChanged, appBasePath }): JSX.Element => {
+  // the GPU tab only exists for RAPIDS applications
+  const isGpuApp = useAppSelector((state) => state.spark.gpuDiagnosis !== undefined);
   const [open, setOpen] = React.useState(true);
 
   const handleDrawerChanged = () => {
@@ -143,7 +146,7 @@ export const AppDrawer: FC<{
         <div>
           <Box>
             <List>
-              {Object.values(Tab).map((tab) => (
+              {Object.values(Tab).filter((tab) => tab !== Tab.Gpu || isGpuApp).map((tab) => (
                 <ListItem key={tab} disablePadding>
                   <ListItemButton
                     selected={selectedTab === tab}

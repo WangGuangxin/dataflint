@@ -37,6 +37,10 @@ class Spark4PageFactory extends DataflintPageFactory {
     new DataflintSQLPlanPage(ui, dataflintStore, sqlListener)
   }
   
+  override def createResourceMetricsPage(ui: SparkUI, dataflintStore: DataflintStore): WebUIPage = {
+    new DataflintResourceMetricsPage(ui, dataflintStore)
+  }
+
   override def createSQLStagesRddPage(ui: SparkUI): WebUIPage = {
     new DataflintSQLStagesRddPage(ui)
   }

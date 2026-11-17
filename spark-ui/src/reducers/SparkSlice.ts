@@ -11,6 +11,7 @@ import { SparkExecutors } from "../interfaces/SparkExecutors";
 import { SparkJobs } from "../interfaces/SparkJobs";
 import { SparkSQLs } from "../interfaces/SparkSQLs";
 import { SparkStages } from "../interfaces/SparkStages";
+import { ResourceMetricsSummary } from "../interfaces/ResourceMetrics";
 import { NodesMetrics } from "../interfaces/SqlMetrics";
 import { SQLPlans } from "../interfaces/SQLPlan";
 import { StagesRdd } from "../interfaces/StagesRdd";
@@ -20,6 +21,7 @@ import {
   calculateSparkExecutorsStore,
   calculateSparkExecutorsTimeline,
 } from "./ExecutorsReducer";
+import { calculateGpuDiagnosis } from "./GpuDiagnosisReducer";
 import {
   calculateJobsStore,
   calculateSqlQueryLevelMetricsReducer,
@@ -48,7 +50,36 @@ export const initialState: AppStore = {
   executorTimeline: undefined,
   environmentInfo: undefined,
   durationMode: "exclusive",
+  resourceMetrics: undefined,
+  gpuDiagnosis: undefined,
 };
+
+function recalculateDiagnosisAndAlerts(state: AppStore) {
+  if (
+    state.config &&
+    state.jobs &&
+    state.sql &&
+    state.executors &&
+    state.stages &&
+    state.status
+  ) {
+    state.gpuDiagnosis = calculateGpuDiagnosis(
+      state.sql,
+      state.stages,
+      state.config,
+      state.resourceMetrics,
+    );
+    state.alerts = reduceAlerts(
+      state.sql,
+      state.status,
+      state.stages,
+      state.config,
+      state.executors,
+      state.environmentInfo,
+      state.gpuDiagnosis,
+    );
+  }
+}
 
 const sparkSlice = createSlice({
   name: "sparkApi",
@@ -93,6 +124,15 @@ const sparkSlice = createSlice({
       state.stages = undefined;
       state.jobs = undefined;
       state.executors = undefined;
+      state.resourceMetrics = undefined;
+      state.gpuDiagnosis = undefined;
+    },
+    setResourceMetrics: (
+      state,
+      action: PayloadAction<{ value: ResourceMetricsSummary | undefined }>,
+    ) => {
+      state.resourceMetrics = action.payload.value;
+      recalculateDiagnosisAndAlerts(state);
     },
     setStages: (
       state,
@@ -283,14 +323,7 @@ const sparkSlice = createSlice({
           state.executors,
           state.durationMode,
         );
-        state.alerts = reduceAlerts(
-          state.sql,
-          state.status,
-          state.stages,
-          state.config!,
-          state.executors,
-          state.environmentInfo
-        );
+        recalculateDiagnosisAndAlerts(state);
       }
     },
   },
@@ -323,6 +356,7 @@ export const {
   setSparkJobs,
   setSQL,
   onCycleEnd,
+  setResourceMetrics,
 } = sparkSlice.actions;
 
 export default sparkSlice.reducer;

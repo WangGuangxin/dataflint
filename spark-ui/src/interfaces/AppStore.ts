@@ -1,7 +1,9 @@
 import { EnvironmentInfo } from './ApplicationInfo';
 import { RddStorageInfo } from './CachedStorage';
 import { DeltaLakeScanInfo } from "./DeltaLakeInfo";
+import { GpuDiagnosisStore } from "./GpuDiagnosis";
 import { IcebergCommitsInfo } from "./IcebergInfo";
+import { ResourceMetricsSummary } from "./ResourceMetrics";
 
 export type NodeType =
   | "input"
@@ -28,6 +30,10 @@ export type AppStore = {
   alerts: AlertsStore | undefined;
   environmentInfo: EnvironmentInfo | undefined;
   durationMode: "exclusive" | "inclusive";
+  // executor CPU / IO / GPU samples from the DataFlint executor plugin (undefined when absent)
+  resourceMetrics: ResourceMetricsSummary | undefined;
+  // RAPIDS (GPU) bottleneck analysis, undefined for non GPU applications
+  gpuDiagnosis: GpuDiagnosisStore | undefined;
 };
 
 export interface AlertsStore {
@@ -50,7 +56,7 @@ export interface StageAlertSourceData {
 
 export interface StatusAlertSourceData {
   type: "status";
-  metric: "memory" | "driverMemory" | "idleCores";
+  metric: "memory" | "driverMemory" | "idleCores" | "gpu";
 }
 
 export interface Alert {
@@ -113,6 +119,8 @@ export interface ConfigStore {
   driverMemoryBytes: number;
   driverMemoryBytesString: string;
   driverMemoryBytesSparkFormatString: string;
+  // all spark properties, used by rules that need arbitrary keys (e.g. spark.rapids.*)
+  sparkProperties: Record<string, string>;
 }
 
 export interface RunMetadataStore {
@@ -351,6 +359,15 @@ export interface EnrichedSqlNode {
   deltaLakeScan: DeltaLakeScanInfo | undefined;
   cachedStorage: RddStorageInfo | undefined;
   nodeIdFromMetrics: number | undefined;
+  // numeric totals of RAPIDS node metrics (durations in ms, sizes in bytes), GPU nodes only
+  rapidsMetrics?: Record<string, RapidsNodeMetric>;
+}
+
+export interface RapidsNodeMetric {
+  value: number;
+  // stage of the max task as reported inside the metric value ("(stage 8.0: task 21)"),
+  // lets us attribute exchange write/read metrics to their own stage
+  stageId?: number;
 }
 
 export interface SQLNodeExchangeStageData {
@@ -455,6 +472,23 @@ export interface SparkStageStore {
   spillDiskDistriution: number[];
   outputRowsDistribution: number[];
   metrics: SparkMetricsStore;
+  breakdown?: StageExecutionBreakdown;
+  // named task accumulators (e.g. RAPIDS gpuSemaphoreWait / gpuTime), durations in ms, sizes in bytes
+  accumulators?: Record<string, number>;
+}
+
+export interface StageExecutionBreakdown {
+  executorRunTimeMs: number;
+  executorCpuTimeMs: number;
+  jvmGcTimeMs: number;
+  shuffleFetchWaitMs: number;
+  shuffleWriteTimeMs: number;
+  memoryBytesSpilled: number;
+  diskBytesSpilled: number;
+  inputBytes: number;
+  medianTaskInputBytes: number | undefined;
+  submissionTimeEpoc: number | undefined;
+  completionTimeEpoc: number | undefined;
 }
 
 export type SparkExecutorsStore = SparkExecutorStore[];

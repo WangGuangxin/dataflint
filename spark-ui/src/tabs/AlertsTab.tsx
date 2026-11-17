@@ -80,6 +80,8 @@ export const AlertsTab: FC<{}> = (): JSX.Element => {
     } else if (alert.source.type === "stage") {
       // Navigate to summary with sqlId and stageId for stage-based alerts
       navigate(`/summary?sqlid=${alert.source.sqlId}&stageId=${alert.source.stageId}`);
+    } else if (alert.source.type === "status" && alert.source.metric === "gpu") {
+      navigate("/gpu");
     } else {
       // Navigate to resources for status alerts
       navigate("/resources");

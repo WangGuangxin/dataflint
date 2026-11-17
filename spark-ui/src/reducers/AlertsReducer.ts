@@ -8,6 +8,7 @@ import {
   SparkStageStore,
   StatusStore,
 } from "../interfaces/AppStore";
+import { GpuDiagnosisStore } from "../interfaces/GpuDiagnosis";
 import { StageMap } from "../interfaces/StageMap";
 import { parseAlertDisabledConfig } from "../utils/ConfigParser";
 import { reduceBroadcastTooLargeAlert } from "./Alerts/BroadcastTooLargeAlert";
@@ -20,6 +21,7 @@ import { reduceMaxPartitionToBigAlert } from "./Alerts/MaxPartitionToBigAlert";
 import { reduceMemoryAlerts } from "./Alerts/MemoryAlertsReducer";
 import { reduceSQLInputOutputAlerts } from "./Alerts/MemorySQLInputOutputAlerts";
 import { reducePartitionSkewAlert } from "./Alerts/PartitionSkewAlert";
+import { reduceRapidsGpuAlerts } from "./Alerts/RapidsGpuAlerts";
 import { reduceSmallTasksAlert } from "./Alerts/SmallTasksAlert";
 import { reduceWastedCoresAlerts } from "./Alerts/WastedCoresAlertsReducer";
 
@@ -37,7 +39,8 @@ export function reduceAlerts(
   stageStore: SparkStagesStore,
   config: ConfigStore,
   executors: SparkExecutorsStore,
-  environmentInfo: any
+  environmentInfo: any,
+  gpuDiagnosis?: GpuDiagnosisStore,
 ): AlertsStore {
   const alerts: Alerts = [];
 
@@ -56,6 +59,7 @@ export function reduceAlerts(
   reduceLargeCrossJoinScanAlert(sqlStore, alerts);
   reduceMaxPartitionToBigAlert(sqlStore, stageMap, alerts);
   reduceFullScanAlert(sqlStore, alerts);
+  reduceRapidsGpuAlerts(gpuDiagnosis, sqlStore, alerts);
   const disabledAlerts = parseAlertDisabledConfig(config.alertDisabled);
   const filteredAlerts = alerts.filter(alert => !disabledAlerts.has(alert.name));
   return {

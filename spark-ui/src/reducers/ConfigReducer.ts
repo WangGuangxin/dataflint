@@ -398,6 +398,7 @@ export function extractConfig(
       driverMemoryBytesSparkFormatString: driverMemoryStr,
       driverMemoryBytes,
       driverMemoryBytesString,
+      sparkProperties: sparkPropertiesObj,
     },
   ];
 }

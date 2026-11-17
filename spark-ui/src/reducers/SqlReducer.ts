@@ -44,6 +44,7 @@ import { parseBatchEvalPython } from "./PlanParsers/batchEvalPythonParser";
 import { parseHashAggregate } from "./PlanParsers/hashAggregateParser";
 import {
   calcNodeMetrics,
+  calcRapidsNodeMetrics,
   calcNodeType,
   extractTotalFromStatisticsMetric,
   findStageIdFromMetrics,
@@ -514,6 +515,7 @@ function calculateSql(
       ...node,
       nodeIdFromMetrics: nodeIdFromMetrics,
       metrics: updateNodeMetrics(node, node.metrics, graph, onlyGraphNodes),
+      rapidsMetrics: calcRapidsNodeMetrics(node.nodeName, node.metrics),
       enrichedName: updateNodeEnrichedName(node, onlyGraphNodes, graph),
       parsedPlan: updateParsedPlan(node, onlyGraphNodes, graph),
       exchangeMetrics: exchangeMetrics,
@@ -718,6 +720,7 @@ export function updateSqlNodeMetrics(
     return {
       ...node,
       metrics: metrics,
+      rapidsMetrics: calcRapidsNodeMetrics(node.nodeName, originalMetrics),
       nodeIdFromMetrics: nodeIdFromMetrics,
       exchangeMetrics: exchangeMetrics,
     };

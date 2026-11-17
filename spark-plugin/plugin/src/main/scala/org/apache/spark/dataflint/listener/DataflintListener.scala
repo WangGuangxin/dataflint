@@ -1,5 +1,6 @@
 package org.apache.spark.dataflint.listener
 
+import org.apache.spark.dataflint.resource.{DataflintResourceSamplesEvent, ResourceSampleBatchWrapper}
 import org.apache.spark.internal.Logging
 import org.apache.spark.scheduler.{SparkListener, SparkListenerEvent}
 import org.apache.spark.sql.execution.ui.{SparkListenerSQLAdaptiveExecutionUpdate, SparkListenerSQLExecutionStart}
@@ -25,6 +26,9 @@ class DataflintListener(store: ElementTrackingStore) extends SparkListener with 
         case e: DataflintDeltaLakeScanEvent => {
           val wrapper = new DataflintDeltaLakeScanInfoWrapper(e.scanInfo)
           store.write(wrapper)
+        }
+        case e: DataflintResourceSamplesEvent => {
+          store.write(new ResourceSampleBatchWrapper(e.batch))
         }
         case _ => {}
       }

@@ -10,6 +10,7 @@ import {
   SparkSQLResourceUsageStore,
   SparkSQLStore,
   SparkStagesStore,
+  StageExecutionBreakdown,
   StatusStore,
 } from "../interfaces/AppStore";
 import { CachedStorage } from "../interfaces/CachedStorage";
@@ -18,6 +19,7 @@ import { SqlStatus } from "../interfaces/SparkSQLs";
 import { SparkStage, SparkStages } from "../interfaces/SparkStages";
 import { StagesRdd } from "../interfaces/StagesRdd";
 import { calculatePercentage, msToHours, timeStrToEpocTime } from "../utils/FormatUtils";
+import { parseMetricNumber } from "../utils/MetricValueParser";
 import { calculateSqlStage } from "./SQLNodeStageReducer";
 
 const moment = extendMoment(Moment);
@@ -111,9 +113,44 @@ export function calculateStagesStore(
           shuffleWriteBytes: stage.shuffleWriteBytes,
           totalTasks: stage.numTasks,
         },
+        breakdown: calculateStageBreakdown(stage),
+        accumulators: calculateStageAccumulators(stage),
       };
     });
   return stagesStore;
+}
+
+export function calculateStageBreakdown(stage: SparkStage): StageExecutionBreakdown {
+  return {
+    executorRunTimeMs: stage.executorRunTime ?? 0,
+    // executorCpuTime and shuffleWriteTime are reported in nanoseconds
+    executorCpuTimeMs: (stage.executorCpuTime ?? 0) / 1e6,
+    jvmGcTimeMs: stage.jvmGcTime ?? 0,
+    shuffleFetchWaitMs: stage.shuffleFetchWaitTime ?? 0,
+    shuffleWriteTimeMs: (stage.shuffleWriteTime ?? 0) / 1e6,
+    memoryBytesSpilled: stage.memoryBytesSpilled ?? 0,
+    diskBytesSpilled: stage.diskBytesSpilled ?? 0,
+    inputBytes: stage.inputBytes ?? 0,
+    medianTaskInputBytes: stage.taskMetricsDistributions?.inputMetrics?.bytesRead?.[5],
+    submissionTimeEpoc: stage.submissionTime ? timeStrToEpocTime(stage.submissionTime) : undefined,
+    completionTimeEpoc: stage.completionTime ? timeStrToEpocTime(stage.completionTime) : undefined,
+  };
+}
+
+/** Named task accumulators, e.g. RAPIDS "gpuSemaphoreWait": "00:00:28.535" -> 28535 (ms). */
+export function calculateStageAccumulators(
+  stage: SparkStage,
+): Record<string, number> | undefined {
+  if (!Array.isArray(stage.accumulatorUpdates) || stage.accumulatorUpdates.length === 0) {
+    return undefined;
+  }
+  const result: Record<string, number> = {};
+  for (const acc of stage.accumulatorUpdates) {
+    if (acc === null || typeof acc.name !== "string") continue;
+    const value = parseMetricNumber(acc.value);
+    if (value !== undefined) result[acc.name] = value;
+  }
+  return Object.keys(result).length === 0 ? undefined : result;
 }
 
 export function calculatePartitionSkew(stage: SparkStage) {
